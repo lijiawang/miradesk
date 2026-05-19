@@ -1,0 +1,10 @@
+[project]
+name = "miradesk"
+version = "0.1.0"
+description = "Local AI workbench with a FastAPI backend and Vite frontend."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv.workspace]
+members = ["backend"]

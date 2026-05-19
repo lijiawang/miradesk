@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MiraDesk</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">CW</div>
+          <div>
+            <div class="brand-title">MiraDesk</div>
+            <div class="brand-subtitle">Local AI Desk</div>
+          </div>
+          <button class="collapse-button" type="button" title="收起侧边栏">◐</button>
+        </div>
+
+        <nav class="nav primary-nav" aria-label="Primary">
+          <button id="newSessionButton" class="sidebar-action active" type="button" title="新建聊天">
+            <span class="nav-icon">✎</span>
+            <span>新聊天</span>
+          </button>
+          <button class="sidebar-action nav-item" data-section="tasks">
+            <span class="nav-icon">◷</span>
+            <span>定时任务</span>
+          </button>
+          <button class="sidebar-action nav-item" data-section="runs">
+            <span class="nav-icon">≡</span>
+            <span>运行记录</span>
+          </button>
+        </nav>
+
+        <section class="recent-section">
+          <div class="recent-title">最近</div>
+          <div id="sessionList" class="session-list"></div>
+        </section>
+
+        <div class="status-panel">
+          <div class="status-row">
+            <span>API</span>
+            <strong id="apiStatus">检查中</strong>
+          </div>
+          <div class="status-row">
+            <span>Scheduler</span>
+            <strong id="schedulerStatus">检查中</strong>
+          </div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <h1 id="sectionTitle">会话</h1>
+            <p id="sectionMeta">本机 Claude CLI 执行工作台</p>
+          </div>
+          <div class="topbar-actions">
+            <button id="refreshButton" class="icon-button" title="刷新">
+              <span>↻</span>
+            </button>
+            <button id="clearConsoleButton" class="icon-button" title="清空当前输出">
+              <span>⌫</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="chat-layout" data-view="chat">
+          <section class="chat-window">
+            <div class="chat-window-header">
+              <div>
+                <div id="activeSessionTitle" class="chat-title">新会话</div>
+                <div class="chat-meta">
+                  <span id="messageCount">0</span>
+                  <span>条上下文</span>
+                </div>
+              </div>
+              <div class="chat-header-actions">
+                <span id="runState" class="state-pill">空闲</span>
+                <button id="copyOutputButton" class="mini-button" type="button">复制输出</button>
+              </div>
+            </div>
+
+            <div id="messageList" class="message-list chat-transcript"></div>
+
+            <form id="chatForm" class="chat-composer">
+              <textarea id="promptInput" rows="3" placeholder="有问题，尽管问"></textarea>
+              <div class="composer-tools">
+                <label class="field">
+                  <span>命令</span>
+                  <select id="commandInput">
+                    <option value="chat">chat</option>
+                    <option value="complete">complete</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>超时秒数</span>
+                  <input id="timeoutInput" type="number" min="1" max="86400" value="300" />
+                </label>
+                <label class="field">
+                  <span>CLI 路径</span>
+                  <input id="cliPathInput" type="text" placeholder="claude" />
+                </label>
+                <div class="composer-actions">
+                  <button class="secondary-button" type="button" id="saveAsTaskButton">
+                    <span>◷</span>
+                    <span>定时</span>
+                  </button>
+                  <button class="secondary-button" type="button" id="stopStreamButton" disabled>
+                    <span>■</span>
+                    <span>停止</span>
+                  </button>
+                  <button class="send-button" type="submit" title="发送">
+                    <span>↑</span>
+                  </button>
+                </div>
+              </div>
+              <pre id="outputConsole" class="console-output hidden-output" aria-hidden="true"></pre>
+            </form>
+          </section>
+        </section>
+
+        <section class="content-grid hidden" data-view="tasks">
+          <section class="panel task-editor">
+            <div class="panel-header">
+              <h2>任务配置</h2>
+              <span class="state-pill">SQLite</span>
+            </div>
+            <form id="taskForm" class="stack">
+              <label class="field">
+                <span>名称</span>
+                <input id="taskNameInput" type="text" placeholder="daily-summary" required />
+              </label>
+              <label class="field">
+                <span>Prompt</span>
+                <textarea id="taskPromptInput" rows="8" placeholder="定时执行时发送给 Claude 的内容"></textarea>
+              </label>
+              <div class="form-grid">
+                <label class="field">
+                  <span>命令</span>
+                  <select id="taskCommandInput">
+                    <option value="chat">chat</option>
+                    <option value="complete">complete</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>间隔秒数</span>
+                  <input id="taskIntervalInput" type="number" min="10" value="3600" />
+                </label>
+                <label class="field">
+                  <span>首次运行</span>
+                  <input id="taskNextRunInput" type="datetime-local" />
+                </label>
+                <label class="field">
+                  <span>超时秒数</span>
+                  <input id="taskTimeoutInput" type="number" min="1" max="86400" value="300" />
+                </label>
+              </div>
+              <label class="check-field">
+                <input id="taskEnabledInput" type="checkbox" checked />
+                <span>创建后启用</span>
+              </label>
+              <button class="primary-button" type="submit">
+                <span>＋</span>
+                <span>创建任务</span>
+              </button>
+            </form>
+          </section>
+
+          <section class="panel task-list-panel">
+            <div class="panel-header">
+              <h2>任务列表</h2>
+              <span id="taskCount" class="counter">0</span>
+            </div>
+            <div id="taskList" class="task-list"></div>
+          </section>
+        </section>
+
+        <section class="content-grid hidden" data-view="runs">
+          <section class="panel run-list-panel">
+            <div class="panel-header">
+              <h2>运行记录</h2>
+              <select id="runTaskSelect"></select>
+            </div>
+            <div id="runList" class="run-list"></div>
+          </section>
+          <section class="panel output-panel">
+            <div class="panel-header">
+              <h2>记录详情</h2>
+              <span id="selectedRunState" class="state-pill">未选择</span>
+            </div>
+            <pre id="runDetailConsole" class="console-output"></pre>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div id="toastHost" class="toast-host" aria-live="polite"></div>
+    <script>
+      window.__CLAUDE_WEB_API_BASE_URL__ = window.__CLAUDE_WEB_API_BASE_URL__ || "";
+    </script>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

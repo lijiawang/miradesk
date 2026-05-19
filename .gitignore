@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+backend/.venv
+
+# Local runtime data
+data/*.sqlite3
+data/*.sqlite3-*
+backend/data/*.sqlite3
+backend/data/*.sqlite3-*
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.npm-cache/
+frontend/.env.local
