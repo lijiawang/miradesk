@@ -24,6 +24,7 @@ setup:
 	cd frontend && npm install
 
 run: setup
+	$(MAKE) stop
 	@echo "MiraDesk backend:  http://localhost:$(BACKEND_PORT)"
 	@echo "MiraDesk frontend: http://localhost:$(FRONTEND_PORT)"
 	@echo
@@ -31,6 +32,7 @@ run: setup
 
 run-lan: HOST = 0.0.0.0
 run-lan: setup
+	$(MAKE) stop
 	@echo "MiraDesk backend:  http://localhost:$(BACKEND_PORT)"
 	@echo "MiraDesk frontend: http://localhost:$(FRONTEND_PORT)"
 	@echo "LAN access is enabled; use the Network URL printed by Vite only from other devices."
