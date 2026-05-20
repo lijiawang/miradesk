@@ -2,15 +2,24 @@ import asyncio
 from collections.abc import AsyncIterator
 import json
 import logging
+import os
+import pty
+import re
+import select
 import shlex
 import subprocess
+import termios
+import time
 from typing import Any
 
 from app.core.config import Settings
 from app.core.utils import truncate
-from app.schemas.claude import ClaudeCLIRequest, ClaudeCLIResponse
+from app.schemas.claude import ClaudeCLIRequest, ClaudeCLIResponse, ClaudeSlashCommand
 
 logger = logging.getLogger("uvicorn.error")
+
+ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\a]*(?:\a|\x1b\\)|\x1b[()][A-Za-z]")
+CURSOR_RIGHT_RE = re.compile(r"\x1b\[(\d*)C")
 
 
 class CommandNotAllowedError(ValueError):
@@ -59,6 +68,136 @@ class ClaudeCLIService:
             cmd.extend((f"--{key_norm}", str(value)))
 
         return cmd, stdin_text
+
+    async def discover_slash_commands(
+        self,
+        cli_path: str | None = None,
+        timeout: float = 3.0,
+    ) -> tuple[list[ClaudeSlashCommand], str, str | None]:
+        try:
+            output = await asyncio.to_thread(
+                self._capture_interactive_slash_menu,
+                cli_path or self.settings.default_cli_path,
+                timeout,
+            )
+            commands = self._parse_slash_menu(output)
+            if commands:
+                return commands, "claude", None
+            return [], "claude", "Claude slash menu returned no parseable commands"
+        except Exception as exc:
+            logger.warning("Failed to discover Claude slash commands: %s", exc)
+            return [], "claude", str(exc)
+
+    def _capture_interactive_slash_menu(self, cli_path: str, timeout: float) -> str:
+        master_fd, slave_fd = pty.openpty()
+        termios.tcsetwinsize(slave_fd, (100, 100))
+        env = {
+            **os.environ,
+            "TERM": "xterm-256color",
+            "COLUMNS": "100",
+            "LINES": "100",
+            "NO_COLOR": "1",
+        }
+        process = subprocess.Popen(
+            [cli_path],
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=str(self.settings.workspace_path),
+            env=env,
+            close_fds=True,
+            text=False,
+        )
+        os.close(slave_fd)
+        chunks: list[bytes] = []
+        deadline = time.monotonic() + timeout
+        slash_at = time.monotonic() + 0.8
+        sent_slash = False
+
+        try:
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([master_fd], [], [], 0.1)
+                if ready:
+                    try:
+                        chunk = os.read(master_fd, 8192)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+
+                if not sent_slash and time.monotonic() >= slash_at and time.monotonic() < deadline - 0.8:
+                    os.write(master_fd, b"/")
+                    sent_slash = True
+
+            for key in (b"\x03", b"\x03"):
+                if process.poll() is not None:
+                    break
+                try:
+                    os.write(master_fd, key)
+                except OSError:
+                    break
+                time.sleep(0.1)
+
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=0.6)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+        finally:
+            os.close(master_fd)
+
+        return b"".join(chunks).decode("utf-8", errors="replace")
+
+    def _parse_slash_menu(self, output: str) -> list[ClaudeSlashCommand]:
+        text = CURSOR_RIGHT_RE.sub(lambda match: " " * int(match.group(1) or "1"), output)
+        text = ANSI_RE.sub("", text)
+        text = text.replace("\r", "\n").replace("\xa0", " ")
+        details: dict[str, str] = {}
+        current_name: str | None = None
+
+        for raw_line in text.splitlines():
+            line = re.sub(r"[^\S\n]+", " ", raw_line).strip()
+            match = re.match(r"^(?P<name>/[A-Za-z0-9][\w:./-]*)(?:\s+(?P<detail>.+))?$", line)
+            if match:
+                name = match.group("name")
+                if name in details:
+                    current_name = name
+                    continue
+                detail = (match.group("detail") or "").strip()
+                if not detail or detail == name:
+                    current_name = None
+                    continue
+                details[name] = detail
+                current_name = name
+                continue
+
+            if not current_name or not line:
+                continue
+
+            if any(token in line for token in ("Claude Code", "Tips for", "What's new", "Press Ctrl-C")):
+                current_name = None
+                continue
+            if set(line) <= {"─", "╭", "╮", "╰", "╯", "│", " "}:
+                current_name = None
+                continue
+            if line.startswith(("❯", "?", "●", "⏵")):
+                current_name = None
+                continue
+
+            details[current_name] = f"{details[current_name]} {line}"
+
+        return [
+            ClaudeSlashCommand(
+                name=name,
+                title=title,
+                detail=detail,
+                source="claude",
+            )
+            for name, detail in details.items()
+            for title in [name.lstrip("/").replace(":", " ").replace("-", " ").title()]
+        ]
 
     async def execute(self, request: ClaudeCLIRequest) -> ClaudeCLIResponse:
         cmd, stdin_text = self.build_command(

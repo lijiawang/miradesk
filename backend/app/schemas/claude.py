@@ -16,3 +16,15 @@ class ClaudeCLIResponse(BaseModel):
     error: str | None = None
     return_code: int | None = None
 
+
+class ClaudeSlashCommand(BaseModel):
+    name: str
+    title: str
+    detail: str
+    source: str = "claude"
+
+
+class ClaudeSlashCommandResponse(BaseModel):
+    commands: list[ClaudeSlashCommand]
+    source: str
+    error: str | None = None

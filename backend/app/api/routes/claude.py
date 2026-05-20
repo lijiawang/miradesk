@@ -2,12 +2,30 @@ import json
 import subprocess
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.schemas.claude import ClaudeCLIRequest, ClaudeCLIResponse
+from app.schemas.claude import (
+    ClaudeCLIRequest,
+    ClaudeCLIResponse,
+    ClaudeSlashCommandResponse,
+)
 from app.services.claude_cli import CommandNotAllowedError
 
 router = APIRouter(prefix="/claude", tags=["claude"])
+
+
+@router.get("/slash-commands", response_model=ClaudeSlashCommandResponse)
+async def list_slash_commands(
+    request: Request,
+    cli_path: str | None = None,
+) -> JSONResponse:
+    claude_cli = request.app.state.claude_cli
+    commands, source, error = await claude_cli.discover_slash_commands(cli_path=cli_path)
+    payload = ClaudeSlashCommandResponse(commands=commands, source=source, error=error)
+    return JSONResponse(
+        content=payload.model_dump(),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.post("/run", response_model=ClaudeCLIResponse)

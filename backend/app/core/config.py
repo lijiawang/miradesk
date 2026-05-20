@@ -14,6 +14,7 @@ def _split_env_list(value: str) -> tuple[str, ...]:
 class Settings:
     app_name: str = os.getenv("APP_NAME", "MiraDesk")
     app_version: str = os.getenv("APP_VERSION", "0.1.0")
+    workspace_path: Path = Path(os.getenv("WORKSPACE_PATH", str(BASE_DIR.parent)))
     database_path: Path = Path(
         os.getenv("DATABASE_PATH", str(BASE_DIR / "data" / "miradesk.sqlite3"))
     )

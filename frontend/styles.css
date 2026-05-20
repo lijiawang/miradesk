@@ -697,12 +697,86 @@ body[data-section="chat"] .chat-transcript[data-empty="false"] {
 }
 
 .chat-composer {
+  position: relative;
   margin: 0 auto 24px;
   width: min(100% - 48px, 780px);
   border: 1px solid var(--line);
   border-radius: 28px;
   background: #ffffff;
   box-shadow: 0 16px 42px rgba(15, 23, 42, 0.1);
+}
+
+.slash-command-menu {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  gap: 4px;
+  max-height: min(320px, 42vh);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
+}
+
+.slash-command-menu[hidden] {
+  display: none;
+}
+
+.slash-command-item {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.slash-command-item:hover,
+.slash-command-item.active {
+  background: #f1f5f9;
+}
+
+.slash-command-name {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  color: #0f766e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.slash-command-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.slash-command-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slash-command-copy span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 body[data-section="chat"] .chat-transcript[data-empty="true"] + .chat-composer {
@@ -712,6 +786,11 @@ body[data-section="chat"] .chat-transcript[data-empty="true"] + .chat-composer {
   min-height: 58px;
   padding: 8px 10px 8px 14px;
   margin-bottom: 0;
+}
+
+body[data-section="chat"] .chat-transcript[data-empty="true"] + .chat-composer .slash-command-menu {
+  left: 0;
+  right: 0;
 }
 
 body[data-section="chat"] .chat-transcript[data-empty="true"] + .chat-composer::before {

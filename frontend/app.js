@@ -6,6 +6,17 @@ const state = {
   selectedTaskId: null,
   currentStreamController: null,
   streamingSessionId: null,
+  claudeSlashCommands: [],
+  slashCommandsLoading: false,
+  slashCommandsRequestId: 0,
+  slashMenu: {
+    open: false,
+    query: "",
+    start: 0,
+    end: 0,
+    selectedIndex: 0,
+    items: [],
+  },
 };
 
 const SESSION_STORAGE_KEY = "miradesk.sessions.v1";
@@ -35,6 +46,7 @@ const elements = {
   newSessionButton: $("#newSessionButton"),
   activeSessionTitle: $("#activeSessionTitle"),
   outputConsole: $("#outputConsole"),
+  slashCommandMenu: $("#slashCommandMenu"),
   runState: $("#runState"),
   chatForm: $("#chatForm"),
   promptInput: $("#promptInput"),
@@ -68,6 +80,58 @@ const sectionCopy = {
   tasks: ["定时任务", "创建、触发、启停本机 Claude 任务"],
   runs: ["运行记录", "查看定时任务的历史输出"],
 };
+
+const webSlashCommands = [
+  {
+    name: "/chat",
+    title: "Chat",
+    detail: "使用 chat 模式发送当前输入",
+    mode: "insert",
+    value: "/chat ",
+  },
+  {
+    name: "/complete",
+    title: "Complete",
+    detail: "使用 complete 模式发送当前输入",
+    mode: "insert",
+    value: "/complete ",
+  },
+  {
+    name: "/task",
+    title: "定时任务",
+    detail: "把后面的内容转成定时任务草稿",
+    mode: "insert",
+    value: "/task ",
+  },
+  {
+    name: "/new",
+    title: "新会话",
+    detail: "打开一个空白会话窗口",
+    mode: "action",
+    action: "new",
+  },
+  {
+    name: "/clear",
+    title: "清空上下文",
+    detail: "清空当前会话消息和输出",
+    mode: "action",
+    action: "clear",
+  },
+  {
+    name: "/copy",
+    title: "复制输出",
+    detail: "复制当前会话最后一次输出",
+    mode: "action",
+    action: "copy",
+  },
+  {
+    name: "/help",
+    title: "命令列表",
+    detail: "查看 Web 端可用的 / 命令",
+    mode: "action",
+    action: "help",
+  },
+];
 
 function formatDate(value) {
   if (!value) return "未设置";
@@ -312,6 +376,245 @@ function renderMessages() {
 function renderOutput() {
   const session = getActiveSession();
   elements.outputConsole.textContent = session?.lastOutput || "";
+}
+
+function normalizeClaudeSlashCommand(command) {
+  return {
+    name: command.name,
+    title: command.title || command.name.replace(/^\//, ""),
+    detail: command.detail || "Claude Code slash command",
+    mode: "insert",
+    value: `${command.name} `,
+    source: command.source || "claude",
+  };
+}
+
+function getSlashCommands() {
+  const commands = [...webSlashCommands];
+  const seen = new Set(commands.map((command) => command.name));
+  for (const command of state.claudeSlashCommands) {
+    if (seen.has(command.name)) continue;
+    commands.push(command);
+    seen.add(command.name);
+  }
+  return commands;
+}
+
+async function loadSlashCommands({ quiet = true } = {}) {
+  const requestId = ++state.slashCommandsRequestId;
+  state.slashCommandsLoading = true;
+  try {
+    const params = new URLSearchParams();
+    const cliPath = elements.cliPathInput.value.trim();
+    if (cliPath) params.set("cli_path", cliPath);
+    const suffix = params.toString() ? `?${params}` : "";
+    const data = await request(`/claude/slash-commands${suffix}`, { cache: "no-store" });
+    if (requestId !== state.slashCommandsRequestId) return;
+    state.claudeSlashCommands = (data.commands || []).map(normalizeClaudeSlashCommand);
+    if (!quiet) {
+      const count = state.claudeSlashCommands.length;
+      toast(count ? `已同步 ${count} 个 Claude Code / 命令` : "没有获取到 Claude Code / 命令");
+    }
+    updateSlashMenu({ refresh: false });
+  } catch (error) {
+    if (requestId !== state.slashCommandsRequestId) return;
+    state.claudeSlashCommands = [];
+    if (!quiet) {
+      toast(`同步 Claude Code / 命令失败：${error.message}`, "error");
+    }
+  } finally {
+    if (requestId === state.slashCommandsRequestId) {
+      state.slashCommandsLoading = false;
+    }
+  }
+}
+
+function clearActiveSession() {
+  const session = getActiveSession();
+  if (!session) return;
+  session.messages = [];
+  session.lastOutput = "";
+  session.updatedAt = new Date().toISOString();
+  saveSessions();
+  renderSessions();
+  renderMessages();
+  renderOutput();
+}
+
+function getSlashTrigger(value, cursor) {
+  const beforeCursor = value.slice(0, cursor);
+  const match = beforeCursor.match(/(^|\s)(\/[^\s]*)$/);
+  if (!match) return null;
+
+  return {
+    query: match[2].toLowerCase(),
+    start: beforeCursor.length - match[2].length,
+    end: cursor,
+  };
+}
+
+function getFilteredSlashCommands(query) {
+  return getSlashCommands().filter(
+    (command) =>
+      command.name.includes(query) ||
+      command.title.toLowerCase().includes(query.replace("/", "")),
+  );
+}
+
+function closeSlashMenu() {
+  state.slashMenu.open = false;
+  state.slashMenu.items = [];
+  state.slashMenu.selectedIndex = 0;
+  elements.slashCommandMenu.hidden = true;
+  elements.slashCommandMenu.innerHTML = "";
+}
+
+function renderSlashMenu() {
+  const menu = state.slashMenu;
+  if (!menu.open || menu.items.length === 0) {
+    closeSlashMenu();
+    return;
+  }
+
+  elements.slashCommandMenu.hidden = false;
+  elements.slashCommandMenu.innerHTML = menu.items
+    .map(
+      (command, index) => `
+        <button
+          class="slash-command-item ${index === menu.selectedIndex ? "active" : ""}"
+          type="button"
+          data-slash-index="${index}"
+        >
+          <span class="slash-command-name">${escapeHtml(command.name)}</span>
+          <span class="slash-command-copy">
+            <strong>${escapeHtml(command.title)}</strong>
+            <span>${escapeHtml(command.detail)}</span>
+          </span>
+        </button>
+      `,
+    )
+    .join("");
+}
+
+function updateSlashMenu(options = {}) {
+  const input = elements.promptInput;
+  const trigger = getSlashTrigger(input.value, input.selectionStart);
+  if (!trigger) {
+    closeSlashMenu();
+    return;
+  }
+
+  if (options.refresh !== false && !state.slashMenu.open) {
+    state.claudeSlashCommands = [];
+    loadSlashCommands();
+  }
+
+  const items = getFilteredSlashCommands(trigger.query);
+  if (items.length === 0) {
+    closeSlashMenu();
+    return;
+  }
+
+  state.slashMenu = {
+    open: true,
+    query: trigger.query,
+    start: trigger.start,
+    end: trigger.end,
+    selectedIndex: Math.min(state.slashMenu.selectedIndex, items.length - 1),
+    items,
+  };
+  renderSlashMenu();
+}
+
+function insertSlashCommand(command) {
+  const input = elements.promptInput;
+  const before = input.value.slice(0, state.slashMenu.start);
+  const after = input.value.slice(state.slashMenu.end);
+  const needsSpace = before && !/\s$/.test(before) ? " " : "";
+  input.value = `${before}${needsSpace}${command.value}${after}`;
+  const cursor = `${before}${needsSpace}${command.value}`.length;
+  closeSlashMenu();
+  input.focus();
+  input.setSelectionRange(cursor, cursor);
+}
+
+async function runSlashAction(command, { keepInput = false } = {}) {
+  closeSlashMenu();
+  if (command.action === "new") {
+    addSession();
+    elements.promptInput.value = "";
+    elements.promptInput.focus();
+    toast("已打开新会话");
+  }
+  if (command.action === "clear") {
+    clearActiveSession();
+    elements.promptInput.value = "";
+    elements.promptInput.focus();
+    toast("当前上下文已清空");
+  }
+  if (command.action === "copy") {
+    const output = getActiveSession()?.lastOutput || "";
+    if (!output) {
+      toast("当前没有可复制的输出", "error");
+      return;
+    }
+    await navigator.clipboard.writeText(output);
+    if (!keepInput) elements.promptInput.value = "";
+    elements.promptInput.focus();
+    toast("输出已复制");
+  }
+  if (command.action === "help") {
+    const list = getSlashCommands().map((item) => `${item.name}  ${item.detail}`).join("\n");
+    elements.promptInput.value = list;
+    elements.promptInput.focus();
+  }
+}
+
+async function applySlashCommand(command) {
+  if (!command) return;
+  if (command.mode === "insert") {
+    insertSlashCommand(command);
+    return;
+  }
+  await runSlashAction(command);
+}
+
+async function handleSlashSubmit() {
+  const raw = elements.promptInput.value.trim();
+  const match = raw.match(/^\/([a-z-]+)(?:\s+([\s\S]*))?$/i);
+  if (!match) return false;
+
+  const command = getSlashCommands().find((item) => item.name === `/${match[1].toLowerCase()}`);
+  if (!command) return false;
+
+  const rest = (match[2] || "").trim();
+  if (command.name === "/chat" || command.name === "/complete") {
+    if (!rest) return false;
+    elements.commandInput.value = command.name.slice(1);
+    elements.promptInput.value = rest;
+    return false;
+  }
+
+  if (command.name === "/task") {
+    if (!rest) {
+      toast("在 /task 后输入要保存的 Prompt", "error");
+      return true;
+    }
+    elements.taskPromptInput.value = rest;
+    elements.taskNameInput.value = `task-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`;
+    elements.taskCommandInput.value = elements.commandInput.value;
+    elements.taskTimeoutInput.value = elements.timeoutInput.value;
+    elements.promptInput.value = "";
+    switchSection("tasks");
+    return true;
+  }
+
+  if (command.mode === "action") {
+    await runSlashAction(command);
+    return true;
+  }
+
+  return false;
 }
 
 function renderMessageContent(message, index) {
@@ -681,7 +984,36 @@ function bindEvents() {
     toast("消息已复制");
   });
 
+  elements.promptInput.addEventListener("input", updateSlashMenu);
+  elements.promptInput.addEventListener("click", updateSlashMenu);
+  elements.promptInput.addEventListener("blur", () => {
+    setTimeout(closeSlashMenu, 120);
+  });
+
   elements.promptInput.addEventListener("keydown", (event) => {
+    if (state.slashMenu.open) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const count = state.slashMenu.items.length;
+        state.slashMenu.selectedIndex = (state.slashMenu.selectedIndex + direction + count) % count;
+        renderSlashMenu();
+        return;
+      }
+
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        applySlashCommand(state.slashMenu.items[state.slashMenu.selectedIndex]);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSlashMenu();
+        return;
+      }
+    }
+
     if (event.key !== "Enter" || event.shiftKey || event.isComposing) {
       return;
     }
@@ -692,6 +1024,9 @@ function bindEvents() {
   elements.chatForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
+      if (await handleSlashSubmit()) {
+        return;
+      }
       if (state.currentStreamController) {
         toast("当前会话正在输出，请先停止或等待完成", "error");
         return;
@@ -703,10 +1038,21 @@ function bindEvents() {
       renderSessions();
       renderMessages();
       elements.promptInput.value = "";
+      closeSlashMenu();
       await runClaude(payload, session.id);
     } catch (error) {
       toast(error.message, "error");
     }
+  });
+
+  elements.slashCommandMenu.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+  });
+
+  elements.slashCommandMenu.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-slash-index]");
+    if (!button) return;
+    applySlashCommand(state.slashMenu.items[Number(button.dataset.slashIndex)]);
   });
 
   elements.saveAsTaskButton.addEventListener("click", () => {
@@ -809,6 +1155,7 @@ function bindEvents() {
     await navigator.clipboard.writeText(elements.outputConsole.textContent || "");
     toast("输出已复制");
   });
+
 }
 
 async function boot() {
